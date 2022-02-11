@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 University Corporation for Atmospheric Research
+ * Copyright 2020 University Corporation for Atmospheric Research
  *
  * This file is part of the UDUNITS-2 package.  See the file COPYRIGHT
  * in the top-level source-directory of the package for copying and
@@ -29,22 +29,22 @@
 #define stricmp _stricmp
 #define isatty _isatty
 
-//We must accomodate the lack of snprintf in MSVC.
-//c99_snprintf is defined in c99_snprintf.c, in lib/.
-#define snprintf c99_snprintf
+//We must accommodate the lack of snprintf in versions of MSVC less than 1900.
+//udunits_snprintf is defined in udunits_snprintf.c, in lib/.
+#define snprintf udunits_snprintf
 
-int c99_snprintf(
+int udunits_snprintf(
    char* str,
      size_t size,
      const char* format,
      ...);
 
-int c99_vsnprintf(
+int udunits_vsnprintf(
 char* str,
   size_t size,
   const char* format,
   va_list ap);
-  
+
 #endif
 
 /* If we are working in Visual Studio and have a
@@ -62,8 +62,21 @@ char* str,
 # define MSC_EXTRA
 #endif /* defined(DLL_UDUNITS2) */
 
-#define EXTERNL MSC_EXTRA extern
+/*
+ * Results in
+ * udunits2.c.obj : error LNK2019: unresolved external symbol cv_free referenced in function handleRequest
+ * udunits2.c.obj : error LNK2019: unresolved external symbol cv_convert_double referenced in function handleRequest
+ * udunits2.c.obj : error LNK2019: unresolved external symbol cv_get_expression referenced in function handleRequest
+ */
+#ifndef EXTERNL
+#   define EXTERNL MSC_EXTRA extern
+#endif
 
+/*
+ * Results in "NMAKE : fatal error U1073: don't know how to make 'lib\udunits2.lib'"
+#undef EXTERNL
+#define EXTERNL extern
+ */
 
 #include "converter.h"
 
@@ -117,7 +130,7 @@ typedef struct ut_visitor {
      *	UT_SUCCESS	Success.
      *	else		Failure.
      */
-    ut_status	(*visit_basic)(const ut_unit* unit, void* arg); 
+    ut_status	(*visit_basic)(const ut_unit* unit, void* arg);
 
     /*
      * Visits a product-unit.  A product-unit is a product of zero or more
@@ -135,7 +148,7 @@ typedef struct ut_visitor {
      *	else		Failure.
      */
     ut_status	(*visit_product)(const ut_unit* unit, int count,
-	const ut_unit* const* basicUnits, const int* powers, void* arg); 
+	const ut_unit* const* basicUnits, const int* powers, void* arg);
 
     /*
      * Visits a Galilean-unit.  A Galilean-unit has an underlying unit and a
@@ -153,7 +166,7 @@ typedef struct ut_visitor {
      *	else		Failure.
      */
     ut_status	(*visit_galilean)(const ut_unit* unit, double scale,
-	const ut_unit* underlyingUnit, double offset, void* arg); 
+	const ut_unit* underlyingUnit, double offset, void* arg);
 
     /*
      * Visits a timestamp-unit.  A timestamp-unit has an underlying unit of time
@@ -169,7 +182,7 @@ typedef struct ut_visitor {
      *	else		Failure.
      */
     ut_status	(*visit_timestamp)(const ut_unit* unit,
-	const ut_unit* timeUnit, double origin, void* arg); 
+	const ut_unit* timeUnit, double origin, void* arg);
 
     /*
      * Visits a logarithmic-unit.  A logarithmic-unit has a logarithmic base and
@@ -185,7 +198,7 @@ typedef struct ut_visitor {
      *	else		Failure.
      */
     ut_status	(*visit_logarithmic)(const ut_unit* unit, double base,
-	const ut_unit* reference, void* arg); 
+	const ut_unit* reference, void* arg);
 } ut_visitor;
 
 
@@ -331,7 +344,7 @@ ut_get_unit_by_name(
 
 
 /*
- * Returns the unit with a given symbol from a unit-system.  Symbol 
+ * Returns the unit with a given symbol from a unit-system.  Symbol
  * comparisons are case-sensitive.
  *
  * Arguments:
@@ -481,7 +494,7 @@ ut_new_dimensionless_unit(
  */
 EXTERNL ut_unit*
 ut_clone(
-    const ut_unit*	unit);
+    const ut_unit* const unit);
 
 
 /*
@@ -774,7 +787,7 @@ ut_compare(
 
 /*
  * Indicates if numeric values in one unit are convertible to numeric values in
- * another unit via "ut_get_converter()".  In making this determination, 
+ * another unit via "ut_get_converter()".  In making this determination,
  * dimensionless units are ignored.
  *
  * Arguments:
@@ -978,7 +991,7 @@ ut_divide(
  *
  * Arguments:
  *	unit	Pointer to the unit.
- *	power	The power by which to raise "unit".  Must be greater than or 
+ *	power	The power by which to raise "unit".  Must be greater than or
  *		equal to -255 and less than or equal to 255.
  * Returns:
  *	NULL	Failure.  "ut_get_status()" will be:
@@ -998,7 +1011,7 @@ ut_raise(
  *
  * Arguments:
  *	unit	Pointer to the unit.
- *	root	The root to take of "unit".  Must be greater than or 
+ *	root	The root to take of "unit".  Must be greater than or
  *		equal to 1 and less than or equal to 255.
  * Returns:
  *	NULL	Failure.  "ut_get_status()" will be:
@@ -1092,7 +1105,7 @@ EXTERNL ut_unit*
 ut_parse(
     const ut_system* const	system,
     const char* const		string,
-    const ut_encoding		encoding);
+    ut_encoding		        encoding);
 
 
 /*
@@ -1197,25 +1210,28 @@ ut_encode_date(
 
 
 /*
- * Encodes a time as a double-precision value.
+ * Encodes a time as a double-precision value. If an input value isn't within
+ * its allowed range, then zero is returned and `ut_get_status()` will return
+ * `UT_BAD_ARG`.
  *
- * Arguments:
- *	hours		The number of hours (0 = midnight).
- *	minutes		The number of minutes.
- *	seconds		The number of seconds.
- * Returns:
- *	The clock-time encoded as a scalar value.
+ * @param[in] hours    The number of hours (0 = midnight). `abs(hours)` must be
+ *                     less than 24.
+ * @param[in] minutes  The number of minutes. `abs(minutes)` must be less than
+ *                     60.
+ * @param[in] seconds  The number of seconds. `fabs(seconds)` must be less than
+ *                     or equal to 62.
+ * @return             The clock-time encoded as a scalar value.
  */
 EXTERNL double
 ut_encode_clock(
-    int		hours,
-    int		minutes,
-    double	seconds);
+    int    hours,
+    int    minutes,
+    double seconds);
 
 
 /*
  * Encodes a time as a double-precision value.  The convenience function is
- * equivalent to "ut_encode_date(year,month,day) + 
+ * equivalent to "ut_encode_date(year,month,day) +
  * ut_encode_clock(hour,minute,second)"
  *
  * Arguments:
@@ -1312,7 +1328,7 @@ ut_handle_error_message(
  *
  * Arguments:
  *      handler		NULL or pointer to the error-message handler.  If NULL,
- *			then the handler is not changed.  The 
+ *			then the handler is not changed.  The
  *			currently-installed handler can be obtained this way.
  * Returns:
  *	Pointer to the previously-installed error-message handler.
